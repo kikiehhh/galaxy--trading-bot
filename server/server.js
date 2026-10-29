@@ -13,6 +13,7 @@ import { createPumpPortalStream } from './pumpPortalStream.js';
 import { createTurboBuyBot } from './turboBuyBot.js';
 import { createWhaleSafetyChecker } from './whaleSafetyChecker.js';
 import { createAutoRepairBot } from './autoRepairBot.js';
+import { keypairFromTraderKey } from './traderKey.js';
 const bs58 = bs58Pkg.default || bs58Pkg;
 
 const app = express();
@@ -219,40 +220,33 @@ async function keypairFromSecret(secret) {
   );
 }
 
+async function useEphemeralTraderWallet() {
+  try {
+    const ephemeral = await Keypair.generate();
+    traderKeypair = ephemeral;
+    traderWalletAddress = ephemeral.publicKey.toBase58();
+    liveWallet.setAddress(traderWalletAddress);
+    console.log(`[trader-key] Using ephemeral wallet (not persisted): ${traderWalletAddress}`);
+  } catch (e) {
+    console.warn(`[trader-key] Ephemeral wallet could not be created: ${e.message}`);
+  }
+}
+
 async function loadTraderKeypair() {
-  if (!TRADER_PRIVATE_KEY || PLACEHOLDER_VALUES.includes(TRADER_PRIVATE_KEY.toLowerCase())) {
+  if (!TRADER_PRIVATE_KEY || PLACEHOLDER_VALUES.includes(TRADER_PRIVATE_KEY.trim().toLowerCase())) {
     console.warn('TRADER_PRIVATE_KEY not set or placeholder — auto trading disabled');
-    // Create ephemeral wallet so app stays live
-    try {
-      const ephemeral = await Keypair.generate();
-      traderKeypair = ephemeral;
-      traderWalletAddress = ephemeral.publicKey.toBase58();
-      liveWallet.setAddress(traderWalletAddress);
-      console.log(`[trader-key] Using ephemeral wallet (not persisted): ${traderWalletAddress}`);
-    } catch (e2) {
-      console.warn(`[trader-key] Ephemeral fallback failed: ${e2.message}`);
-    }
+    await useEphemeralTraderWallet();
     return;
   }
   try {
-    let secret;
-    secret = decodePrivateKey(TRADER_PRIVATE_KEY);
-    const imported = await keypairFromSecret(secret);
-    traderKeypair = imported.keypair;
-    traderWalletAddress = traderKeypair.publicKey.toBase58();
+    const keypair = await keypairFromTraderKey(TRADER_PRIVATE_KEY);
+    traderKeypair = keypair;
+    traderWalletAddress = keypair.publicKey.toBase58();
     liveWallet.setAddress(traderWalletAddress);
     console.log(`Trader wallet loaded: ${traderWalletAddress}`);
   } catch (e) {
-    console.warn(`TRADER_PRIVATE_KEY is set but invalid — using ephemeral: ${e.message}`);
-    try {
-      const ephemeral = await Keypair.generate();
-      traderKeypair = ephemeral;
-      traderWalletAddress = ephemeral.publicKey.toBase58();
-      liveWallet.setAddress(traderWalletAddress);
-      console.log(`[trader-key] Using ephemeral wallet (not persisted): ${traderWalletAddress}`);
-    } catch (e2) {
-      console.warn(`[trader-key] Ephemeral fallback failed: ${e2.message}`);
-    }
+    console.warn(e.message);
+    await useEphemeralTraderWallet();
   }
 }
 
