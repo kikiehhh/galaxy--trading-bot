@@ -27,7 +27,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // ---------- Load .env (Vite-style vars live in the project root .env) ----------
 const __dirname = dirname(fileURLToPath(import.meta.url));
