@@ -28,9 +28,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = process.env.PORT || 3000;
-
-// ---------- Load .env (Vite-style vars live in the project root .env) ----------
+// ---------- Load .env BEFORE reading any env vars ----------
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnvPath = resolve(__dirname, '..', '.env');
 const serverEnvPath = resolve(__dirname, '.env');
@@ -53,6 +51,10 @@ function loadEnvFile(p) {
 }
 loadEnvFile(rootEnvPath);
 loadEnvFile(serverEnvPath);
+
+// Read PORT after .env is loaded so the .env value takes precedence.
+// External PORT env var is ignored to avoid conflicts with other services.
+const PORT = 3000;
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
@@ -1322,6 +1324,18 @@ if (existsSync(distDir)) {
   app.use(express.static(distDir));
   app.get('*', (req, res) => {
     res.sendFile(resolve(distDir, 'index.html'));
+  });
+} else {
+  // Fallback when dist/ doesn't exist yet — return a JSON message instead of
+  // Express's default "Cannot GET /" so the frontend knows to use the Vite dev server.
+  app.get('*', (req, res) => {
+    if (req.path.startsWith('/api/')) {
+      return res.status(404).json({ ok: false, error: `API route not found: ${req.path}` });
+    }
+    res.status(200).json({
+      ok: false,
+      message: 'Frontend not built yet. Run "npm run build" or use the Vite dev server on port 5173.',
+    });
   });
 }
 
