@@ -480,6 +480,7 @@ app.post('/api/wallet/import', async (req, res) => {
     traderKeypair = imported.keypair;
     traderWalletAddress = addr;
     liveWallet.setAddress(addr);
+    turboBuyBot = null;
     const keyB58 = bs58.encode(new Uint8Array(await imported.keypair.secretKey));
     persistTraderKey(keyB58);
     console.log(`[wallet/import] New trader wallet loaded: ${addr}`);
@@ -498,6 +499,7 @@ app.post('/api/wallet/generate', async (req, res) => {
     traderKeypair = kp;
     traderWalletAddress = pubKey;
     liveWallet.setAddress(pubKey);
+    turboBuyBot = null;
     const base58Key = bs58.encode(new Uint8Array(secretKeyBytes));
     persistTraderKey(base58Key);
     console.log(`[wallet/generate] New trader wallet: ${pubKey}`);
@@ -637,19 +639,20 @@ app.get('/api/trades', async (req, res) => {
 // Loads a new Solana keypair and persists it to .env so it survives restarts.
 // Only the public address is returned; the private key is never echoed back.
 function persistTraderKey(keyB58) {
-  try {
-    const envPath = serverEnvPath;
-    let lines = [];
-    if (existsSync(envPath)) {
-      lines = readFileSync(envPath, 'utf8').split('\n');
+  for (const envPath of [rootEnvPath, serverEnvPath]) {
+    try {
+      let lines = [];
+      if (existsSync(envPath)) {
+        lines = readFileSync(envPath, 'utf8').split('\n');
+      }
+      const filtered = lines.filter((l) => !l.startsWith('TRADER_PRIVATE_KEY='));
+      filtered.push(`TRADER_PRIVATE_KEY=${keyB58}`);
+      writeFileSync(envPath, filtered.join('\n').replace(/\n+$/, '\n'));
+    } catch (e) {
+      console.warn(`[trader-key] could not persist to ${envPath}: ${e.message}`);
     }
-    const filtered = lines.filter((l) => !l.startsWith('TRADER_PRIVATE_KEY='));
-    filtered.push(`TRADER_PRIVATE_KEY=${keyB58}`);
-    writeFileSync(envPath, filtered.join('\n').replace(/\n+$/, '\n'));
-    process.env.TRADER_PRIVATE_KEY = keyB58;
-  } catch (e) {
-    console.warn(`[trader-key] could not persist to .env: ${e.message}`);
   }
+  process.env.TRADER_PRIVATE_KEY = keyB58;
 }
 
 app.post('/api/trader/private-key', async (req, res) => {
@@ -668,6 +671,7 @@ app.post('/api/trader/private-key', async (req, res) => {
     traderKeypair = imported.keypair;
     traderWalletAddress = addr;
     liveWallet.setAddress(addr);
+    turboBuyBot = null;
     const keyB58 = bs58.encode(new Uint8Array(await imported.keypair.secretKey));
     persistTraderKey(keyB58);
     console.log(`[trader-key] New trader wallet loaded at runtime: ${addr}`);
@@ -705,6 +709,7 @@ app.post('/api/trader/generate-wallet', async (req, res) => {
     traderKeypair = kp;
     traderWalletAddress = pubKey;
     liveWallet.setAddress(pubKey);
+    turboBuyBot = null;
     const base58Key = bs58.encode(new Uint8Array(secretKeyBytes));
     const jsonKey = JSON.stringify(Array.from(secretKeyBytes));
     persistTraderKey(base58Key);
