@@ -724,7 +724,7 @@ app.post('/api/trader/generate-wallet', async (req, res) => {
     });
   } catch (e) {
     console.warn(`[generate-wallet] failed: ${e.message}`);
-    res.status(500).json({ ok: false, error: `Failed to generate wallet: ${e.message}` });
+    res.json({ ok: false, error: `Failed to generate wallet: ${e.message}` });
   }
 });
 

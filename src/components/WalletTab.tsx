@@ -174,9 +174,12 @@ export function WalletTab({ turboMode }: { turboMode?: boolean }) {
     setError(null);
     try {
       const result = await generateTraderWallet();
+      if (!result.ok || !result.address) {
+        setError(result.error || 'Failed to generate wallet — unknown error');
+        return;
+      }
       setGenerated(result);
       setConfig({ ok: true, configured: true, publicKey: result.address });
-      // Immediately start live polling
       const [ws, lv] = await Promise.all([fetchTraderWallet(), fetchLiveWallet()]);
       setWalletStatus(ws);
       setLive(lv);
