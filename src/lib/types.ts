@@ -62,4 +62,4 @@ export interface Whale {
   created_at: string;
 }
 
-export type TabKey = 'agents' | 'traders' | 'risk' | 'whales' | 'whale_killer' | 'wallet' | 'tokens' | 'settings';
+export type TabKey = 'agents' | 'traders' | 'risk' | 'whales' | 'whale_killer' | 'fee_collector' | 'wallet' | 'tokens' | 'settings';

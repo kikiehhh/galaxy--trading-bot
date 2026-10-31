@@ -1323,6 +1323,267 @@ function startServerFeed() {
   pumpPortalStream.start();
 }
 
+// ---------- Auto Fee Collector (Pump.fun creator fees + dust token swap) ----------
+const WINTER_WALLET = process.env.WINTER_WALLET || '';
+const PUMP_API_BASE = 'https://frontend-api-v3.pump.fun/coins/user';
+const JUPITER_QUOTE_API = 'https://quote-api.jupiter.ag/v6/quote';
+const JUPITER_SWAP_API = 'https://quote-api.jupiter.ag/v6/swap';
+const PUBLIC_RPC = 'https://api.mainnet-beta.solana.com';
+const FEE_MIN_CLAIM_SOL = Number(process.env.FEE_MIN_CLAIM_SOL || 0.0005);
+
+let feeCollectorState = {
+  enabled: false,
+  intervalMs: 5 * 60 * 1000,
+  todayCollectedSol: 0,
+  todayDate: new Date().toDateString(),
+  lastCheckAt: null,
+  lastClaimAt: null,
+  claimableNowSol: 0,
+  totalClaims: 0,
+  log: [],
+};
+
+function feeLog(msg) {
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const entry = { time, message: msg, ts: Date.now() };
+  feeCollectorState.log.unshift(entry);
+  if (feeCollectorState.log.length > 50) feeCollectorState.log.pop();
+  console.log(`[fee-collector] ${msg}`);
+}
+
+function resetDailyIfNeeded() {
+  const today = new Date().toDateString();
+  if (feeCollectorState.todayDate !== today) {
+    feeCollectorState.todayDate = today;
+    feeCollectorState.todayCollectedSol = 0;
+  }
+}
+
+async function rpcWithFallback(method, params) {
+  const rpcs = [HELIUS_RPC, PUBLIC_RPC].filter(Boolean);
+  for (const rpc of rpcs) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(rpc, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        });
+        if (!res.ok) throw new Error(`RPC ${res.status}`);
+        const json = await res.json();
+        if (json.error) throw new Error(json.error.message || 'RPC error');
+        return json;
+      } catch (e) {
+        if (attempt === 2) continue;
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
+  }
+  return { error: 'All RPCs failed' };
+}
+
+async function checkPumpFees(walletAddress) {
+  try {
+    const res = await fetch(`${PUMP_API_BASE}/${walletAddress}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return { claimableSol: 0, tokens: [] };
+    const data = await res.json();
+    const tokens = Array.isArray(data) ? data : (data.coins || data.tokens || []);
+    let claimableSol = 0;
+    const claimableTokens = [];
+    for (const token of tokens) {
+      const fee = Number(token.claimable_fee || token.creator_fee || 0);
+      if (fee > 0) {
+        const feeSol = fee / 1_000_000_000;
+        claimableSol += feeSol;
+        claimableTokens.push({
+          mint: token.mint || token.address,
+          symbol: token.symbol || token.name || 'UNKNOWN',
+          feeLamports: fee,
+          feeSol,
+        });
+      }
+    }
+    return { claimableSol, tokens: claimableTokens };
+  } catch (e) {
+    return { claimableSol: 0, tokens: [], error: e.message };
+  }
+}
+
+async function checkDustTokens(walletAddress) {
+  try {
+    const result = await rpcWithFallback('getTokenAccountsByOwner', [
+      walletAddress,
+      { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' },
+      { encoding: 'jsonParsed', commitment: 'confirmed' },
+    ]);
+    if (result.error) return { tokens: [], error: result.error };
+    const accounts = result.result?.value || [];
+    const dustTokens = [];
+    for (const acct of accounts) {
+      const info = acct.account?.data?.parsed?.info;
+      const amt = info?.tokenAmount;
+      if (!info || !amt) continue;
+      const raw = BigInt(amt.amount || '0');
+      if (raw === 0n) continue;
+      const decimals = Number(amt.decimals || 0);
+      const humanAmount = Number(raw) / Math.pow(10, decimals);
+      if (humanAmount > 0) {
+        dustTokens.push({ mint: info.mint, amount: humanAmount, decimals, rawAmount: amt.amount });
+      }
+    }
+    return { tokens: dustTokens };
+  } catch (e) {
+    return { tokens: [], error: e.message };
+  }
+}
+
+async function swapDustToSol(mint, rawAmount, decimals, wallet) {
+  try {
+    const quoteRes = await fetch(`${JUPITER_QUOTE_API}?inputMint=${mint}&outputMint=So11111111111111111111111111111111111111112&amount=${rawAmount}&slippageBps=${SWAP_SLIPPAGE_BPS}&decimals=${decimals}`);
+    if (!quoteRes.ok) return null;
+    const quote = await quoteRes.json();
+    if (!quote.outAmount) return null;
+    const swapRes = await fetch(JUPITER_SWAP_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quoteResponse: quote, userPublicKey: wallet.publicKey.toBase58(), wrapAndUnwrapSol: true }),
+    });
+    if (!swapRes.ok) return null;
+    const swapData = await swapRes.json();
+    if (!swapData.swapTransaction) return null;
+    const swapTxBuf = Buffer.from(swapData.swapTransaction, 'base64');
+    const tx = await VersionedTransaction.deserialize(swapTxBuf);
+    tx.sign([wallet]);
+    const sig = await rpcWithFallback('sendTransaction', [Buffer.from(tx.serialize()).toString('base64'), { encoding: 'base64', maxRetries: 2 }]);
+    if (sig.error) return null;
+    return { signature: sig.result, outAmount: quote.outAmount };
+  } catch { return null; }
+}
+
+async function executeFeeClaim() {
+  if (!traderKeypair || !traderWalletAddress) return { ok: false, error: 'No trader wallet configured' };
+  resetDailyIfNeeded();
+  feeCollectorState.lastCheckAt = Date.now();
+  const pumpFees = await checkPumpFees(traderWalletAddress);
+  const dust = await checkDustTokens(traderWalletAddress);
+  const totalClaimable = pumpFees.claimableSol || 0;
+  feeCollectorState.claimableNowSol = totalClaimable;
+
+  if (totalClaimable < FEE_MIN_CLAIM_SOL && dust.tokens.length === 0) {
+    feeLog(`No claimable fees (${totalClaimable.toFixed(6)} SOL < min ${FEE_MIN_CLAIM_SOL}) — skipping`);
+    return { ok: true, claimed: false, claimableSol: totalClaimable, dustTokens: 0 };
+  }
+
+  let totalClaimedSol = 0;
+  const signatures = [];
+
+  for (const token of pumpFees.tokens) {
+    const claimResult = await swapDustToSol(token.mint, token.feeLamports, 9, traderKeypair);
+    if (claimResult) {
+      totalClaimedSol += totalClaimable;
+      signatures.push({ type: 'pump-fee', mint: token.mint, signature: claimResult.signature });
+      feeLog(`Claimed ${token.feeSol.toFixed(6)} SOL from Pump fee (${token.symbol}) — Tx: ${claimResult.signature?.slice(0, 8)}`);
+    } else {
+      feeLog(`Claim failed for ${token.symbol} (fee < rent or swap error) — skipped`);
+    }
+  }
+
+  let dustSwapped = 0;
+  for (const token of dust.tokens) {
+    if (token.mint === 'So11111111111111111111111111111111111111112') continue;
+    const swapResult = await swapDustToSol(token.mint, token.rawAmount, token.decimals, traderKeypair);
+    if (swapResult) {
+      dustSwapped++;
+      const outSol = Number(swapResult.outAmount) / 1_000_000_000;
+      totalClaimedSol += outSol;
+      signatures.push({ type: 'dust-swap', mint: token.mint, signature: swapResult.signature });
+      feeLog(`Swapped dust token ${token.mint.slice(0, 6)}… → ${outSol.toFixed(6)} SOL — Tx: ${swapResult.signature?.slice(0, 8)}`);
+    }
+  }
+
+  if (totalClaimedSol > 0 && WINTER_WALLET) {
+    try {
+      const balanceRes = await rpcWithFallback('getBalance', [traderWalletAddress]);
+      const bal = Number(balanceRes.result?.value || 0) / 1_000_000_000;
+      const sendAmount = Math.min(bal - 0.001, totalClaimedSol);
+      if (sendAmount > 0) {
+        const transferIx = SystemProgram.transfer({
+          fromPubkey: traderKeypair.publicKey,
+          toPubkey: new PublicKey(WINTER_WALLET),
+          lamports: Math.floor(sendAmount * 1_000_000_000),
+        });
+        const blockhashRes = await rpcWithFallback('getLatestBlockhash');
+        const msg = new TransactionMessage({
+          payerKey: traderKeypair.publicKey,
+          recentBlockhash: blockhashRes.result?.value?.blockhash,
+          instructions: [transferIx],
+        }).compileToV0Message();
+        const tx = new VersionedTransaction(msg);
+        tx.sign([traderKeypair]);
+        const sendSig = await rpcWithFallback('sendTransaction', [Buffer.from(tx.serialize()).toString('base64'), { encoding: 'base64' }]);
+        if (!sendSig.error) {
+          feeLog(`Sent ${sendAmount.toFixed(6)} SOL to Winter wallet — Tx: ${sendSig.result?.slice(0, 8)}`);
+          signatures.push({ type: 'winter-transfer', signature: sendSig.result });
+        }
+      }
+    } catch (e) { feeLog(`Winter transfer failed: ${e.message}`); }
+  }
+
+  feeCollectorState.todayCollectedSol += totalClaimedSol;
+  feeCollectorState.totalClaims += signatures.length;
+  feeCollectorState.lastClaimAt = Date.now();
+  feeCollectorState.claimableNowSol = 0;
+  if (totalClaimedSol === 0 && signatures.length === 0) {
+    feeLog(`Checked — nothing claimable yet (pump: ${totalClaimable.toFixed(6)} SOL, dust: ${dust.tokens.length} tokens)`);
+  }
+  return { ok: true, claimed: signatures.length > 0, claimedSol: totalClaimedSol, claimableSol: totalClaimable, dustSwapped, signatures };
+}
+
+let feeCollectorTimer = null;
+function startFeeCollectorLoop() {
+  if (feeCollectorTimer) clearInterval(feeCollectorTimer);
+  feeLog(`Auto collector started — interval: ${feeCollectorState.intervalMs / 1000}s`);
+  feeCollectorState.enabled = true;
+  void executeFeeClaim();
+  feeCollectorTimer = setInterval(() => { if (feeCollectorState.enabled) void executeFeeClaim(); }, feeCollectorState.intervalMs);
+}
+function stopFeeCollectorLoop() {
+  if (feeCollectorTimer) clearInterval(feeCollectorTimer);
+  feeCollectorTimer = null;
+  feeCollectorState.enabled = false;
+  feeLog('Auto collector stopped');
+}
+
+app.get('/api/fee-collector/status', (req, res) => {
+  resetDailyIfNeeded();
+  res.json({ ok: true, ...feeCollectorState, wallet: traderWalletAddress, winterWallet: WINTER_WALLET || null, minClaimSol: FEE_MIN_CLAIM_SOL });
+});
+
+app.post('/api/fee-collector/check', async (req, res) => {
+  if (!traderWalletAddress) return res.json({ ok: false, error: 'No wallet configured' });
+  try {
+    const pumpFees = await checkPumpFees(traderWalletAddress);
+    const dust = await checkDustTokens(traderWalletAddress);
+    feeCollectorState.claimableNowSol = pumpFees.claimableSol || 0;
+    feeCollectorState.lastCheckAt = Date.now();
+    res.json({ ok: true, claimableSol: pumpFees.claimableSol, pumpTokens: pumpFees.tokens, dustTokens: dust.tokens, wallet: traderWalletAddress });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+app.post('/api/fee-collector/claim', async (req, res) => {
+  try { res.json(await executeFeeClaim()); } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+app.post('/api/fee-collector/toggle', (req, res) => {
+  const { enabled, intervalMs } = req.body || {};
+  if (typeof enabled !== 'boolean') return res.json({ ok: false, error: 'enabled (boolean) required' });
+  if (typeof intervalMs === 'number' && intervalMs >= 60000) feeCollectorState.intervalMs = intervalMs;
+  if (enabled) startFeeCollectorLoop(); else stopFeeCollectorLoop();
+  res.json({ ok: true, enabled: feeCollectorState.enabled, intervalMs: feeCollectorState.intervalMs });
+});
+
 // ---------- API 404 handler (only for /api/* paths) ----------
 app.use('/api', (req, res) => {
   res.status(404).json({ ok: false, error: `API route not found: ${req.method} ${req.path}` });

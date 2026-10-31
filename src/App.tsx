@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Rocket, Shield, Waves, Settings as SettingsIcon, Play, Square, Activity, Wallet, Sparkles, Skull, Bot, Flame } from 'lucide-react';
+import { Rocket, Shield, Waves, Settings as SettingsIcon, Play, Square, Activity, Wallet, Sparkles, Skull, Bot, Flame, Coins } from 'lucide-react';
 import { engine } from '@/lib/engine';
 import { useEngine, usePumpFeed } from '@/lib/hooks';
 import type { TabKey } from '@/lib/types';
@@ -15,6 +15,7 @@ import { TradeTicker } from '@/components/TradeTicker';
 import { StatusDot } from '@/components/ui';
 import { useBackendStatus, ModeBadge } from '@/components/BackendStatus';
 import { useHealthBot } from '@/lib/useHealthBot';
+import { FeeCollectorTab } from '@/components/FeeCollectorTab';
 
 const TABS: { key: TabKey; label: string; icon: typeof Rocket }[] = [
   { key: 'agents', label: 'Agents', icon: Activity },
@@ -22,6 +23,7 @@ const TABS: { key: TabKey; label: string; icon: typeof Rocket }[] = [
   { key: 'risk', label: 'Risk Manager (BOS)', icon: Shield },
   { key: 'whales', label: 'Whale Scout', icon: Waves },
   { key: 'whale_killer', label: 'WHALE KILLING', icon: Skull },
+  { key: 'fee_collector', label: 'Auto Colek', icon: Coins },
   { key: 'tokens', label: 'Token Activity', icon: Sparkles },
   { key: 'wallet', label: 'Wallet', icon: Wallet },
   { key: 'settings', label: 'Settings', icon: SettingsIcon },
@@ -146,6 +148,8 @@ function App() {
             <WhalesTab newWhale={newWhale} dismissWhale={dismissWhale} />
           ) : tab === 'whale_killer' ? (
             <WhaleKillerTab />
+          ) : tab === 'fee_collector' ? (
+            <FeeCollectorTab autoStart={running} />
           ) : tab === 'tokens' ? (
             <TokenActivityTab turboMode={turboMode} />
           ) : tab === 'wallet' ? (
