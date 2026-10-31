@@ -124,7 +124,8 @@ class TradingEngine {
     this.emit();
   }
 
-  stop() {
+  stop(reason?: string) {
+    console.log(`[WHY STOPPED] ${reason || 'manual stop via engine.stop()'}`);
     this.snap.running = false;
     if (this.interval) {
       clearInterval(this.interval);
@@ -191,7 +192,7 @@ class TradingEngine {
     });
     this.openPositionsByMint.clear();
     this.recentBuys.clear();
-    this.stop();
+    this.stop('emergencySellAll triggered by user');
     this.emit();
   }
 
@@ -270,14 +271,16 @@ class TradingEngine {
     }
 
     if (stopLossHit) {
-      // Cut all trading for the day
+      // Cut all trading for the day but DO NOT stop the engine.
+      // The UI must stay running so the user sees the warning.
       await this.updateSettings({ emergency_stop: true });
       await supabase
         .from('traders')
         .update({ status: 'halted', updated_at: new Date().toISOString() })
         .neq('name', '__none__');
       this.snap.traders = this.snap.traders.map((t) => ({ ...t, status: 'halted' as const }));
-      this.stop();
+      console.log('[WHY STOPPED] Risk Manager BOS: daily stop-loss hit — emergency_stop=true, engine stays running for UI');
+      this.emit();
       return;
     }
 
@@ -285,7 +288,10 @@ class TradingEngine {
     let totalSpentThisTick = 0;
     let totalPnlThisTick = 0;
 
-    for (const trader of this.snap.traders) {
+    for (let i = 0; i < this.snap.traders.length; i++) {
+      const trader = this.snap.traders[i];
+      // 200ms delay between traders to avoid RPC rate limits (Helius free tier)
+      if (i > 0) await new Promise((r) => setTimeout(r, 200));
       if (!trader.active || dailyCapped) {
         if (trader.status !== 'halted' && trader.status !== 'locked') {
           // mark locked but keep row

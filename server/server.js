@@ -258,26 +258,59 @@ async function loadTraderKeypair() {
 let autoTradeEnabled = AUTO_CONFIRM;
 let liveMainnetRuntime = LIVE_MAINNET;
 
-// ---------- JSON-RPC helper to Helius ----------
+// ---------- JSON-RPC helper with fallback + retry ----------
+const FALLBACK_RPCS = [
+  'https://api.mainnet-beta.solana.com',
+  'https://rpc.ankr.com/solana',
+  'https://solana-rpc.publicnode.com',
+];
+
+async function rpcCall(url, method, params) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`RPC ${res.status}: ${text}`);
+  }
+  return await res.json();
+}
+
 async function heliusRpc(method, params) {
-  if (!HELIUS_RPC) {
-    return { error: 'HELIUS_RPC not configured on server' };
+  const primaryUrl = activeRpcUrl || HELIUS_RPC;
+  if (!primaryUrl) {
+    return { error: 'No RPC URL configured on server' };
   }
-  try {
-    const res = await fetch(HELIUS_RPC, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      return { error: `Helius ${res.status}: ${text}` };
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const json = await rpcCall(primaryUrl, method, params);
+      if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+      return json;
+    } catch (e) {
+      if (attempt < 3) { await new Promise((r) => setTimeout(r, 300 * attempt)); continue; }
+      console.log(`[rpc] Primary ${primaryUrl} failed 3x for ${method}: ${e.message}`);
     }
-    const json = await res.json();
-    return json;
-  } catch (e) {
-    return { error: `Helius fetch failed: ${e.message}` };
   }
+
+  for (const fallbackUrl of FALLBACK_RPCS) {
+    if (fallbackUrl === primaryUrl) continue;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const json = await rpcCall(fallbackUrl, method, params);
+        if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+        console.log(`[rpc] Fallback ${fallbackUrl} succeeded for ${method}`);
+        activeRpcUrl = fallbackUrl;
+        return json;
+      } catch (e) {
+        if (attempt < 3) { await new Promise((r) => setTimeout(r, 300 * attempt)); continue; }
+      }
+    }
+  }
+
+  return { error: `All RPC endpoints failed for ${method}` };
 }
 
 // ---------- Basic status (full BackendStatus shape) ----------
@@ -298,6 +331,7 @@ app.get('/api/status', async (req, res) => {
   }
   const walletReady = Boolean(traderKeypair && HELIUS_RPC && !walletError);
   const walletFunded = solBalance >= MIN_WALLET_BALANCE_SOL;
+  const lowBalanceWarning = !walletFunded && walletReady ? `Balance too low (${solBalance.toFixed(4)} SOL), please top up SOL` : null;
   const mode = liveMainnetRuntime && walletReady ? 'live' : walletReady ? 'paper' : 'degraded';
   res.json({
     ok: true,
@@ -309,6 +343,7 @@ app.get('/api/status', async (req, res) => {
     solBalance: Math.round(solBalance * 1_000_000) / 1_000_000,
     walletFunded,
     minWalletBalanceSol: MIN_WALLET_BALANCE_SOL,
+    lowBalanceWarning,
     feedStatus: pumpPortalStream?.snapshot().status || 'disconnected',
     feedEvents: pumpPortalStream?.snapshot().eventCount || 0,
     autoTradeEnabled: autoTradeEnabled && liveMainnetRuntime,

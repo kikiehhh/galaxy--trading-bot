@@ -66,7 +66,7 @@ export function ModeBadge({ status, configured }: { status: BackendStatus | null
   return (
     <span className="stat-pill bg-orange-500/15 text-orange-300 border border-orange-500/30 flex items-center gap-1.5">
       <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
-      DEGRADED · {status.walletError ? 'no wallet' : 'feed only'}
+      DEGRADED · {status.walletError ? 'no wallet' : 'retrying RPC'}
     </span>
   );
 }

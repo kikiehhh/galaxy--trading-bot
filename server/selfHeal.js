@@ -266,27 +266,32 @@ export function createSelfHealBot({
       }
     }
 
-    // ----- RPC switching (status-change alerts only) -----
+    // ----- RPC switching — always retry on degraded -----
     if (health.rpcStatus === 'degraded') {
       const count = trackError('rpc_degraded');
-      if (shouldAlertStatusChange('rpc', health.rpcStatus)) {
-        const currentUrl = getActiveRpc() || heliusUrl;
-        for (const backup of BACKUP_RPCS) {
-          if (backup === currentUrl) continue;
-          const test = await checkRpc(backup);
-          if (test.ok) {
-            setActiveRpc(backup);
-            actions.push(`RPC switched to backup: ${backup}`);
-            addLog(`RPC switched to ${backup}`);
-            if (telegramNotifier) {
-              sendTelegramSafe(
-                `🔄 <b>Self-Heal Bot</b> — RPC Switched\n\nFrom <code>${currentUrl}</code> to <code>${backup}</code>\n⏱ ${new Date().toISOString().slice(0, 19)} UTC`,
-                'rpc-switched',
-              );
-            }
-            break;
+      addLog(`Helius degraded, switching to fallback RPC...`);
+      const currentUrl = getActiveRpc() || heliusUrl;
+      let switched = false;
+      for (const backup of BACKUP_RPCS) {
+        if (backup === currentUrl) continue;
+        const test = await checkRpc(backup);
+        if (test.ok) {
+          setActiveRpc(backup);
+          switched = true;
+          actions.push(`RPC switched to backup: ${backup}`);
+          addLog(`RPC switched to ${backup}`);
+          if (telegramNotifier && shouldAlertStatusChange('rpc', health.rpcStatus)) {
+            sendTelegramSafe(
+              `🔄 <b>Self-Heal Bot</b> — RPC Switched\n\nFrom <code>${currentUrl}</code> to <code>${backup}</code>\n⏱ ${new Date().toISOString().slice(0, 19)} UTC`,
+              'rpc-switched',
+            );
           }
+          break;
         }
+      }
+      if (!switched) {
+        actions.push('All RPC backups degraded — will retry next cycle');
+        addLog('All RPC endpoints degraded — retrying next cycle');
       }
     } else if (health.rpcStatus === 'live' && prevRpcStatus === 'degraded') {
       // RPC recovered — send recovery notice once

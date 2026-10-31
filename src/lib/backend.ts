@@ -11,6 +11,7 @@ export interface BackendStatus {
   paperTrading?: boolean;
   walletFunded?: boolean;
   minWalletBalanceSol?: number;
+  lowBalanceWarning?: string | null;
   wallet: string | null;
   walletError: string | null;
   solBalance: number;

@@ -33,6 +33,7 @@ function App() {
   const snap = useEngine();
   const [tab, setTab] = useState<TabKey>('agents');
   const [turboMode, setTurboMode] = useState(true);
+  const [confirmToggle, setConfirmToggle] = useState(false);
   const { status, latestToken, eventCount, newWhale, dismissWhale } = usePumpFeed(snap.running);
   const { status: backendStatus, configured: backendConfigured, backendUrl } = useBackendStatus(snap.running);
   const { health, active, lastCheckAgo } = useHealthBot();
@@ -41,7 +42,12 @@ function App() {
   const running = snap.running;
 
   const toggleRun = () => {
-    if (running) engine.stop();
+    setConfirmToggle(true);
+  };
+
+  const confirmToggleRun = () => {
+    setConfirmToggle(false);
+    if (running) engine.stop('user clicked Stop in UI');
     else engine.start();
   };
 
@@ -71,7 +77,7 @@ function App() {
                   title={`Last check: ${lastCheckAgo}s ago`}
                 >
                   <Bot className="w-3.5 h-3.5" />
-                  <span>Self-Heal: {active ? 'ACTIVE' : 'CHECKING'}</span>
+                  <span>Self-Heal: {active ? 'CONNECTED' : health?.rpcStatus === 'degraded' ? 'RETRYING' : 'CHECKING'}</span>
                   {lastCheckAgo !== null && <span className="text-[10px] opacity-60 font-mono">{lastCheckAgo}s</span>}
                 </div>
               )}
@@ -125,6 +131,14 @@ function App() {
           </nav>
         </header>
 
+        {/* Low balance warning */}
+        {backendStatus?.lowBalanceWarning && (
+          <div className="mb-3 px-4 py-2.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-300 text-sm font-medium flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+            {backendStatus.lowBalanceWarning}
+          </div>
+        )}
+
         {/* Trade ticker */}
         {snap.trades.length > 0 && (
           <div className="mb-5">
@@ -174,6 +188,36 @@ function App() {
           {backendConfigured && <span className="block mt-1">Backend: <span className="font-mono text-slate-400">{backendUrl}</span></span>}
         </footer>
       </div>
+
+      {/* Confirm Start/Stop modal */}
+      {confirmToggle && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setConfirmToggle(false)}>
+          <div className="glass-panel max-w-sm w-full mx-4 p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-display text-lg font-bold text-white mb-2">
+              {running ? 'Stop Bot?' : 'Start Bot?'}
+            </h3>
+            <p className="text-sm text-slate-400 mb-5">
+              {running
+                ? 'Trading agents will halt. Auto Colek stays running independently. Confirm to stop.'
+                : 'All active trading agents will begin executing. Confirm to start.'}
+            </p>
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => setConfirmToggle(false)}
+                className="px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-slate-300 text-sm font-medium hover:bg-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmToggleRun}
+                className={`btn-neon ${running ? 'btn-danger' : 'btn-primary'} px-5 py-2 text-sm font-bold`}
+              >
+                {running ? 'Stop Now' : 'Start Now'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
