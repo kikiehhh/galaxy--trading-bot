@@ -67,7 +67,7 @@ const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.re
 
 // When VITE_BACKEND_URL is empty, we rely on the Vite dev-server proxy
 // (configured in vite.config.ts) to forward /api/* requests to the backend
-// on localhost:3001. This works in both `vite dev` and `vite preview`.
+// on localhost:3000. This works in both `vite dev` and `vite preview`.
 export function isBackendConfigured() {
   return true;
 }
@@ -80,6 +80,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BACKEND_URL}${path}`, {
     ...init,
     headers: {
+      'Accept': 'application/json',
       'Content-Type': 'application/json',
       ...(init?.headers || {}),
     },

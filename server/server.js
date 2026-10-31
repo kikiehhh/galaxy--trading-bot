@@ -1318,24 +1318,30 @@ function startServerFeed() {
   pumpPortalStream.start();
 }
 
-// ---------- Serve built frontend (so root / never returns "Cannot GET /") ----------
+// ---------- API 404 handler (only for /api/* paths) ----------
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, error: `API route not found: ${req.method} ${req.path}` });
+});
+
+// ---------- Serve built frontend (so root / never returns JSON) ----------
 const distDir = resolve(__dirname, '..', 'dist');
-if (existsSync(distDir)) {
+const indexPath = resolve(distDir, 'index.html');
+if (existsSync(indexPath)) {
   app.use(express.static(distDir));
+  // SPA catch-all: every non-API route serves index.html (never raw JSON)
   app.get('*', (req, res) => {
-    res.sendFile(resolve(distDir, 'index.html'));
+    res.sendFile(indexPath);
   });
 } else {
-  // Fallback when dist/ doesn't exist yet — return a JSON message instead of
-  // Express's default "Cannot GET /" so the frontend knows to use the Vite dev server.
+  // Fallback when dist/ doesn't exist yet — return an HTML page, never JSON
   app.get('*', (req, res) => {
-    if (req.path.startsWith('/api/')) {
-      return res.status(404).json({ ok: false, error: `API route not found: ${req.path}` });
-    }
-    res.status(200).json({
-      ok: false,
-      message: 'Frontend not built yet. Run "npm run build" or use the Vite dev server on port 5173.',
-    });
+    res.set('Content-Type', 'text/html');
+    res.status(200).send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Galaxy Trading</title>` +
+      `<style>body{background:#060818;color:#e2e8f0;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:1rem}` +
+      `h1{color:#22d3ee;font-size:1.5rem}p{color:#94a3b8;font-size:0.9rem;line-height:1.6}</style></head>` +
+      `<body><div><h1>Galaxy Solana Trading</h1><p>Frontend sedang dibangun. Silakan jalankan <code>npm run build</code> atau akses melalui Vite dev server di port 5173.</p></div></body></html>`
+    );
   });
 }
 

@@ -66,7 +66,7 @@ export function WhalesTab({ newWhale, dismissWhale }: {
           Auto-discovers wallets with &gt;60% winrate and &gt;5 SOL profit from the live PumpPortal feed.
           7 sultan wallets prefilled at startup.
         </p>
-        <div className="grid grid-cols-3 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
           <Stat label="Prefilled" value={prefilled.length} tone="purple" />
           <Stat label="Discovered" value={discovered.length} tone="cyan" />
           <Stat label="Total Tracked" value={whales.filter((w) => w.tracked).length} tone="green" />

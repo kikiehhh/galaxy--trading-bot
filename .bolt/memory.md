@@ -8,29 +8,35 @@
 
 ## Brand personality & voice
 
-- Trading/DeFi oriented — implies fast, data-dense, real-time responsiveness
-- Naming convention uses space/crypto themes ("Galaxy")
+- Trading/DeFi oriented — fast, data-dense, real-time responsiveness
+- Space/crypto naming theme ("Galaxy")
 - User communicates in Indonesian — responses should match user's language
 
 ## Visual design & UX direction
 
-- Real-time data feeds require live-updating UI components
-- Dashboard layout pattern for trading/monitoring views
-- Likely dark-mode preference typical of trading interfaces (inferred from product type)
+- Dark-mode trading dashboard aesthetic
+- Responsive grid pattern: `grid-cols-1` on mobile, `grid-cols-3`/`grid-cols-4` on desktop (`md:` breakpoint)
+- Tables use `overflow-x-auto` + small text (`text-[10px]`–`text-sm`) for mobile horizontal scroll
+- Header/nav uses `flex-wrap` + `px-4` for mobile adaptation
+- SPA fallback: all non-API routes serve `index.html`; API isolated to `/api/*`
 
 ## Decisions, constraints & rationale
 
 - Framework: Vite + React
-- Production build verified — compiles with no errors after env updates
-- RPC provider: Helius (`https://mainnet.helius-rpc.com/?api-key=3dabe168-494d-4b60-8660-b3c51a43916a`)
-- Trading wallet generated and stored in `.env` — address: `9V96ySiVjxEgrTEAZrvqovCKK7VamyK95LjmZPg8eiRV`
-- Wallet has zero SOL balance — requires funding (min 0.005 SOL) before live trading
-- `.env` file used for RPC URL and wallet private key configuration
+- Backend server: `server.js` (Express) on port 3000, serves built `dist/` as static + SPA fallback
+- Route separation fix: `/` always returns HTML (frontend), `/api/*` returns JSON; API 404 returns JSON, non-API 404 returns `index.html`
+- If `dist/` missing, server serves minimal HTML fallback (never raw JSON)
+- Frontend API calls include `Accept: application/json` header for `/api/*` endpoints only
+- No `JSON.stringify` raw JSON rendering in frontend components
+- Production build verified — compiles and serves correctly
+- Server runs in MAINNET LIVE mode with PumpPortal feed connected; 7 traders loaded
+- RPC provider: Helius mainnet
+- Trading wallet stored in `.env` (zero SOL balance, requires funding for live trading)
 
 ## Open questions & assumptions
 
-- No explicit design system or styling framework confirmed yet
-- No UI library or charting library identified — likely needed for trading dashboards
-- PumpPortal integration specifics and API keys assumed handled in existing code
+- No explicit design system or styling framework confirmed beyond Tailwind utility classes
+- Charting library not identified — may be needed for advanced trading visualizations
 - Solana wallet connection approach for end users not yet confirmed
 - Wallet private key security best practices not discussed — `.env` in `.gitignore` assumed but unverified
+- `.env` file management persistence in sandbox environment appears unstable (node_modules/dist disappeared between turns)

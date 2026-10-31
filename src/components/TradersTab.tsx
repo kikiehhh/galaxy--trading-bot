@@ -38,13 +38,13 @@ function TraderCard({ trader }: { trader: Trader }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-3">
-        <Stat label="Spend/Trade" value={`$${trader.current_spend.toFixed(3)}`} tone="cyan" />
-        <Stat label="Today PnL" value={`${trader.today_pnl >= 0 ? '+' : ''}$${trader.today_pnl.toFixed(2)}`} tone={pnlTone as 'green' | 'red' | 'default'} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+        <Stat label="Spend/Trade" value={`${trader.current_spend.toFixed(3)}`} tone="cyan" />
+        <Stat label="Today PnL" value={`${trader.today_pnl >= 0 ? '+' : ''}${trader.today_pnl.toFixed(2)}`} tone={pnlTone as 'green' | 'red' | 'default'} />
         <Stat label="Win Rate" value={`${winRate}%`} tone={winRate >= 60 ? 'green' : 'default'} />
       </div>
 
-      <div className="grid grid-cols-4 gap-2 mb-3 text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-center">
         <div className="rounded-lg bg-white/5 py-1.5">
           <div className="text-[10px] text-slate-400">Trades</div>
           <div className="font-mono text-sm text-slate-200">{trader.today_trades}</div>

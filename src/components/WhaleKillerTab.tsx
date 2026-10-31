@@ -105,7 +105,7 @@ export function WhaleKillerTab() {
           <Stat label="Killer PnL" value={fmtSol(snap.killerPnlSol)} tone={snap.killerPnlSol >= 0 ? 'green' : 'red'} />
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-3">
           <Stat label="Wins" value={snap.killerWins} tone="green" />
           <Stat label="Losses" value={snap.killerLosses} tone="red" />
           <Stat label="Total Whale Buys" value={snap.totalWhaleBuys} tone="purple" />
